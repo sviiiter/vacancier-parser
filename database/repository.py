@@ -31,14 +31,16 @@ class MessageRepository:
         try:
             self._conn.execute(
                 """
-                INSERT INTO messages (description, tg_channel_link, tg_message_link, created_date)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO messages (description, tg_channel_link, tg_message_link, created_date, queue_sent, read)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message.description,
                     message.tg_channel_link,
                     message.tg_message_link,
                     message.created_date.isoformat(),
+                    int(message.queue_sent),
+                    int(message.read),
                 ),
             )
             self._conn.commit()
