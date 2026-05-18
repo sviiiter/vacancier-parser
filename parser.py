@@ -30,7 +30,7 @@ async def main() -> None:
     repo = MessageRepository(conn)
 
     last_date = repo.get_last_created_date()
-    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
     since = max(last_date, two_days_ago) if last_date is not None else two_days_ago
     existing_links = repo.get_existing_links()
     log.info("Fetching messages since: %s", since)
