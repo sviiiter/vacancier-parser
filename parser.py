@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from config import (
     DB_PATH,
@@ -29,8 +30,10 @@ async def main() -> None:
     repo = MessageRepository(conn)
 
     last_date = repo.get_last_created_date()
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    since = max(last_date, two_days_ago) if last_date is not None else two_days_ago
     existing_links = repo.get_existing_links()
-    log.info("Last message date in DB: %s", last_date)
+    log.info("Fetching messages since: %s", since)
     log.info("Known links in DB: %d", len(existing_links))
 
     processor = MessageProcessor(
@@ -44,7 +47,7 @@ async def main() -> None:
         for channel in TELEGRAM_CHANNELS:
             log.info("Processing channel: %s", channel)
             try:
-                raw = await fetcher.fetch_new_messages(channel, last_date)
+                raw = await fetcher.fetch_new_messages(channel, since)
                 log.info("  Fetched %d new messages", len(raw))
 
                 passing = processor.process(raw)

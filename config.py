@@ -8,9 +8,16 @@ TELEGRAM_API_HASH: str = os.environ["TELEGRAM_API_HASH"]
 TELEGRAM_SESSION_STRING: str = os.environ["TELEGRAM_SESSION_STRING"]
 
 TELEGRAM_CHANNELS: list[str] = [
+    "recrytingIT",
+    "jc_it",
+    "serbia_jobs",
+    "Remoteit",
     "php_jobs",
-    "backend_jobs",
-    "senior_dev_jobs",
+    "fordev",
+    "devs_it",
+    "jobforphp",
+    "jobGeeks",
+    "@it_jobs_armenia",
 ]
 
 KEYWORDS: list[str] = ["PHP", "backend", "senior"]

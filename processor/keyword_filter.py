@@ -7,4 +7,4 @@ class KeywordFilter:
 
     def matches(self, message: Message) -> bool:
         text = message.description.lower()
-        return any(kw in text for kw in self._keywords)
+        return all(kw in text for kw in self._keywords)
