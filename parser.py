@@ -1,9 +1,9 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from config import (
-    DB_PATH,
     KEYWORDS,
     TELEGRAM_API_HASH,
     TELEGRAM_API_ID,
@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    conn = get_connection(DB_PATH)
+    database_url = os.environ["DATABASE_URL"]
+    conn = get_connection(database_url)
     init_schema(conn)
     repo = MessageRepository(conn)
 

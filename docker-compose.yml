@@ -1,7 +1,0 @@
-services:
-  vacancier:
-    build: .
-    env_file: .env
-    volumes:
-      - ./data:/app/data   # persists vacancier.db across container restarts
-    restart: unless-stopped

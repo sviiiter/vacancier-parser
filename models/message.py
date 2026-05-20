@@ -8,5 +8,5 @@ class Message:
     tg_channel_link: str
     tg_message_link: str
     created_date: datetime
-    queue_sent: bool = False
-    read: bool = False
+    queue_sent: int = 0
+    read: int = 0

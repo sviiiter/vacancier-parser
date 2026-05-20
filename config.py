@@ -21,5 +21,3 @@ TELEGRAM_CHANNELS: list[str] = [
 ]
 
 KEYWORDS: list[str] = ["PHP", "backend", "senior"]
-
-DB_PATH: str = os.getenv("DB_PATH", "data/vacancier.db")

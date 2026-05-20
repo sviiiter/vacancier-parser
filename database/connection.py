@@ -1,36 +1,39 @@
 import logging
 import os
-import sqlite3
+
+import psycopg2
+import psycopg2.extras
 
 
-def get_connection(db_path: str) -> sqlite3.Connection:
-    directory = os.path.dirname(os.path.abspath(db_path))
-    os.makedirs(directory, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_connection(database_url: str) -> psycopg2.extensions.connection:
+    return psycopg2.connect(database_url, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            description     TEXT NOT NULL,
-            tg_channel_link TEXT NOT NULL,
-            tg_message_link TEXT NOT NULL UNIQUE,
-            created_date    TEXT NOT NULL,
-            queue_sent      INTEGER NOT NULL DEFAULT 0,
-            read            INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-    # Migrations for existing databases that predate these columns
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
-    for column, definition in [
-        ("queue_sent", "INTEGER NOT NULL DEFAULT 0"),
-        ("read",       "INTEGER NOT NULL DEFAULT 0"),
-    ]:
-        if column not in existing:
-            conn.execute(f'ALTER TABLE messages ADD COLUMN "{column}" {definition}')
+def init_schema(conn: psycopg2.extensions.connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id              SERIAL PRIMARY KEY,
+                description     TEXT NOT NULL,
+                tg_channel_link TEXT NOT NULL,
+                tg_message_link TEXT NOT NULL UNIQUE,
+                created_date    TIMESTAMPTZ NOT NULL,
+                queue_sent      INTEGER NOT NULL DEFAULT 0,
+                read            INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # Migrations for databases that predate queue_sent / read columns
+        for column, definition in [
+            ("queue_sent", "INTEGER NOT NULL DEFAULT 0"),
+            ("read",       "INTEGER NOT NULL DEFAULT 0"),
+        ]:
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'messages' AND column_name = %s",
+                (column,),
+            )
+            if cur.fetchone() is None:
+                cur.execute(f'ALTER TABLE messages ADD COLUMN "{column}" {definition}')
     conn.commit()
 
 
@@ -38,15 +41,23 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    db_path = os.getenv("DB_PATH", "data/vacancier.db")
+    database_url = os.environ["DATABASE_URL"]
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     log = logging.getLogger(__name__)
-    log.info("DB path: %s", os.path.abspath(db_path))
-    conn = get_connection(db_path)
-    before = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+    log.info("Connecting to: %s", database_url)
+    conn = get_connection(database_url)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'messages'"
+        )
+        before = {row["column_name"] for row in cur.fetchall()}
     log.info("Columns before: %s", sorted(before))
     init_schema(conn)
-    after = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'messages'"
+        )
+        after = {row["column_name"] for row in cur.fetchall()}
     log.info("Columns after:  %s", sorted(after))
     added = after - before
     log.info("Added: %s", sorted(added) if added else "(none — already up to date)")

@@ -1,48 +1,51 @@
-import sqlite3
 from datetime import datetime
+
+import psycopg2.extensions
 
 from models.message import Message
 
 
 class MessageRepository:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: psycopg2.extensions.connection) -> None:
         self._conn = conn
 
     def get_last_created_date(self) -> datetime | None:
-        row = self._conn.execute(
-            "SELECT MAX(created_date) AS last_date FROM messages"
-        ).fetchone()
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT MAX(created_date) AS last_date FROM messages")
+            row = cur.fetchone()
         if row["last_date"] is None:
             return None
-        return datetime.fromisoformat(row["last_date"])
+        return row["last_date"]  # psycopg2 returns a timezone-aware datetime for TIMESTAMPTZ
 
     def get_existing_links(self) -> set[str]:
-        rows = self._conn.execute("SELECT tg_message_link FROM messages").fetchall()
-        return {row["tg_message_link"] for row in rows}
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT tg_message_link FROM messages")
+            return {row["tg_message_link"] for row in cur.fetchall()}
 
     def exists(self, tg_message_link: str) -> bool:
-        row = self._conn.execute(
-            "SELECT 1 FROM messages WHERE tg_message_link = ?",
-            (tg_message_link,),
-        ).fetchone()
-        return row is not None
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM messages WHERE tg_message_link = %s",
+                (tg_message_link,),
+            )
+            return cur.fetchone() is not None
 
     def save(self, message: Message) -> None:
-        try:
-            self._conn.execute(
+        with self._conn.cursor() as cur:
+            cur.execute(
                 """
-                INSERT INTO messages (description, tg_channel_link, tg_message_link, created_date, queue_sent, read)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO messages
+                    (description, tg_channel_link, tg_message_link, created_date, queue_sent, read)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (tg_message_link) DO NOTHING
                 """,
                 (
                     message.description,
                     message.tg_channel_link,
                     message.tg_message_link,
-                    message.created_date.isoformat(),
-                    int(message.queue_sent),
-                    int(message.read),
+                    message.created_date,
+                    message.queue_sent,
+                    message.read,
                 ),
             )
-            self._conn.commit()
-        except sqlite3.IntegrityError:
-            pass  # UNIQUE constraint: silently skip exact duplicates
+        self._conn.commit()
