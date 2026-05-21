@@ -1,1 +1,1 @@
-0 2 * * * cd /app && python parser.py
+0 */1 * * * cd /app && python parser.py
