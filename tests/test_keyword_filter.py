@@ -16,28 +16,25 @@ def _msg(text: str) -> Message:
 
 class TestKeywordFilter(unittest.TestCase):
     def setUp(self) -> None:
-        self.filter = KeywordFilter(["PHP", "backend", "senior"])
+        self.filter = KeywordFilter([["PHP", "Senior"], ["backend", "senior"]])
 
-    def test_matches_exact_uppercase(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("Looking for a PHP developer")))
+    def test_matches_php_and_senior(self) -> None:
+        self.assertTrue(self.filter.matches(_msg("Looking for a Senior PHP developer")))
 
-    def test_matches_lowercase(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("php job available")))
+    def test_matches_backend_and_senior(self) -> None:
+        self.assertTrue(self.filter.matches(_msg("Senior backend engineer needed")))
 
-    def test_matches_mixed_case(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("Senior Backend Engineer needed")))
+    def test_matches_case_insensitive(self) -> None:
+        self.assertTrue(self.filter.matches(_msg("senior backend position open")))
 
-    def test_matches_backend(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("backend developer required")))
+    def test_no_match_php_without_senior(self) -> None:
+        self.assertFalse(self.filter.matches(_msg("PHP developer wanted")))
 
-    def test_matches_senior(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("we need a senior specialist")))
+    def test_no_match_senior_alone(self) -> None:
+        self.assertFalse(self.filter.matches(_msg("senior frontend engineer")))
 
     def test_no_match_unrelated_text(self) -> None:
         self.assertFalse(self.filter.matches(_msg("Frontend JavaScript React developer")))
 
     def test_no_match_empty_description(self) -> None:
         self.assertFalse(self.filter.matches(_msg("")))
-
-    def test_any_keyword_sufficient(self) -> None:
-        self.assertTrue(self.filter.matches(_msg("senior frontend engineer")))

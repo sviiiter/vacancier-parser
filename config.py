@@ -17,7 +17,7 @@ TELEGRAM_CHANNELS: list[str] = [
     "devs_it",
     "jobforphp",
     "jobGeeks",
-    "@it_jobs_armenia",
+    "it_jobs_armenia",
 ]
 
-KEYWORDS: list[str] = ["PHP", "backend", "senior"]
+KEYWORDS: list[list[str]] = [["PHP", "Senior"], ["backend", "senior"]]
