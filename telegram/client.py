@@ -57,6 +57,7 @@ class TelegramChannelFetcher:
                     tg_channel_link=channel_link,
                     tg_message_link=f"{channel_link}/{tg_msg.id}",
                     created_date=msg_date,
+                    source="telegram",
                 )
             )
 

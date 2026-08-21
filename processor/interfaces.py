@@ -1,10 +1,13 @@
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
 
 from models.message import Message
 
+if TYPE_CHECKING:
+    from processor.keyword_filter import FilterResult
+
 
 class MessageFilterProtocol(Protocol):
-    def matches(self, message: Message) -> bool:
+    def matches(self, message: Message) -> 'FilterResult':
         ...
 
 

@@ -16,14 +16,17 @@ def _msg(text: str, link: str) -> Message:
     )
 
 
+from processor.keyword_filter import FilterResult
+
+
 class _AlwaysMatchFilter:
-    def matches(self, message: Message) -> bool:
-        return True
+    def matches(self, message: Message) -> FilterResult:
+        return FilterResult(True, ["test"])
 
 
 class _NeverMatchFilter:
-    def matches(self, message: Message) -> bool:
-        return False
+    def matches(self, message: Message) -> FilterResult:
+        return FilterResult(False, [])
 
 
 class _NeverDuplicateChecker:
@@ -58,7 +61,7 @@ class TestMessageProcessor(unittest.TestCase):
 
     def test_mixed_batch_with_real_collaborators(self) -> None:
         processor = MessageProcessor(
-            KeywordFilter(["PHP"]),
+            KeywordFilter({"required": ["php"], "any": ["developer", "engineer"], "exclude": []}),
             DuplicateChecker(),
         )
         messages = [

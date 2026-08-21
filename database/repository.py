@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime
 
 import psycopg2.extensions
@@ -30,13 +32,23 @@ class MessageRepository:
             )
             return cur.fetchone() is not None
 
+    def exists_by_fingerprint(self, fingerprint: str) -> bool:
+        if not fingerprint:
+            return False
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM messages WHERE fingerprint = %s",
+                (fingerprint,),
+            )
+            return cur.fetchone() is not None
+
     def save(self, message: Message) -> None:
         with self._conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO messages
-                    (description, tg_channel_link, tg_message_link, created_date, queue_sent, read)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (description, tg_channel_link, tg_message_link, created_date, source, queue_sent, read, fingerprint, matched_keywords)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tg_message_link) DO NOTHING
                 """,
                 (
@@ -44,8 +56,11 @@ class MessageRepository:
                     message.tg_channel_link,
                     message.tg_message_link,
                     message.created_date,
+                    message.source,
                     message.queue_sent,
                     message.read,
+                    message.fingerprint,
+                    json.dumps(message.matched_keywords),
                 ),
             )
         self._conn.commit()

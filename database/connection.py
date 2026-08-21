@@ -18,14 +18,18 @@ def init_schema(conn: psycopg2.extensions.connection) -> None:
                 tg_channel_link TEXT NOT NULL,
                 tg_message_link TEXT NOT NULL UNIQUE,
                 created_date    TIMESTAMPTZ NOT NULL,
+                source          TEXT NOT NULL DEFAULT 'telegram',
                 queue_sent      INTEGER NOT NULL DEFAULT 0,
                 read            INTEGER NOT NULL DEFAULT 0
             )
         """)
-        # Migrations for databases that predate queue_sent / read columns
+        # Migrations for databases that predate new columns
         for column, definition in [
             ("queue_sent", "INTEGER NOT NULL DEFAULT 0"),
             ("read",       "INTEGER NOT NULL DEFAULT 0"),
+            ("source",     "TEXT NOT NULL DEFAULT 'telegram'"),
+            ("fingerprint", "TEXT UNIQUE"),
+            ("matched_keywords", "JSONB"),
         ]:
             cur.execute(
                 "SELECT 1 FROM information_schema.columns "
