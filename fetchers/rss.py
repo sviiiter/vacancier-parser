@@ -2,6 +2,8 @@ import logging
 from datetime import datetime, timezone
 
 import feedparser
+import requests
+import io
 
 from models.message import Message
 
@@ -19,7 +21,18 @@ def fetch_rss_vacancies(feed_urls: list[str]) -> list[Message]:
 
 
 def _parse_feed(feed_url: str) -> list[Message]:
-    feed = feedparser.parse(feed_url)
+    # Do request using requests library and timeout
+    try:
+        resp = requests.get(feed_url, timeout=20.0)
+    except requests.ReadTimeout:
+        log.warning("Timeout when reading RSS %s", feed_url)
+        return
+
+    # Put it to memory stream object universal feedparser
+    content = io.BytesIO(resp.content)
+
+    # Parse content
+    feed = feedparser.parse(content)
     source_link = feed.feed.get("link", feed_url)
 
     messages: list[Message] = []
