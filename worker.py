@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 import os
@@ -8,11 +7,10 @@ from typing import Optional
 
 import pika
 
-from config import FILTER_RULES, RABBITMQ_URL
+from config import RABBITMQ_URL
 from database.connection import get_connection, init_schema
 from database.repository import MessageRepository
 from models.message import Message
-from processor.keyword_filter import KeywordFilter
 from processor.text_cleaner import strip_html
 
 logging.basicConfig(
@@ -29,15 +27,13 @@ class MessageWorker:
         self._connection: Optional[pika.BlockingConnection] = None
         self._channel: Optional[pika.adapters.blocking_connection.BlockingChannel] = None
         self._repo: Optional[MessageRepository] = None
-        self._filter = KeywordFilter(FILTER_RULES)
-        self._running = True
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
     def _signal_handler(self, sig, frame):
         log.info("Received signal, shutting down gracefully...")
-        self._running = False
+        self.shutdown()
 
     def start(self) -> None:
         try:
@@ -87,49 +83,8 @@ class MessageWorker:
         try:
             message = Message.from_json(body.decode('utf-8'))
             message.description = strip_html(message.description)
-            result = self._filter.matches(message)
-
-            if not result.matches:
-                # Debug: check which exclude keyword matched
-                text = message.description.lower()
-                exclude_match = [kw for kw in self._filter._exclude if kw in text]
-                log.info(
-                    "Message rejected [%s]: %s | any_rules=%s | exclude_match=%s | first_100=%s",
-                    message.source,
-                    message.tg_message_link,
-                    self._filter._any,
-                    exclude_match if exclude_match else "NONE",
-                    message.description[:100] if message.description else "EMPTY",
-                )
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return
-
-            message.matched_keywords = result.matched_keywords
-            message.fingerprint = self._generate_fingerprint(message)
-
-            if self._repo.exists(message.tg_message_link):
-                log.debug("Message already exists: %s", message.tg_message_link)
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return
-
-            if message.fingerprint and self._repo.exists_by_fingerprint(
-                message.fingerprint
-            ):
-                log.info(
-                    "Duplicate by fingerprint [%s]: %s",
-                    message.source,
-                    message.tg_message_link,
-                )
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return
-
             self._repo.save(message)
-            log.info(
-                "Saved [%s] (keywords: %s): %s",
-                message.source,
-                ",".join(message.matched_keywords),
-                message.tg_message_link,
-            )
+            log.info("Saved [%s]: %s", message.source, message.tg_message_link)
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
         except json.JSONDecodeError as e:
@@ -138,11 +93,6 @@ class MessageWorker:
         except Exception as e:
             log.error("Error processing message: %s", e)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
-    def _generate_fingerprint(self, message: Message) -> str:
-        text = message.description.lower()
-        normalized = " ".join(text.split())
-        return hashlib.sha256(normalized.encode()).hexdigest()
 
     def shutdown(self) -> None:
         log.info("Shutting down...")
@@ -165,3 +115,4 @@ if __name__ == "__main__":
 
     worker = MessageWorker(rabbitmq_url, database_url)
     worker.start()
+# @todo add processor/duplicate_checker.py

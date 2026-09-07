@@ -38,6 +38,40 @@ def init_schema(conn: psycopg2.extensions.connection) -> None:
             )
             if cur.fetchone() is None:
                 cur.execute(f'ALTER TABLE messages ADD COLUMN "{column}" {definition}')
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS file (
+                id       SERIAL PRIMARY KEY,
+                filename TEXT NOT NULL,
+                content  TEXT NOT NULL
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS filters (
+                id      SERIAL PRIMARY KEY,
+                type    TEXT NOT NULL DEFAULT 'json' CHECK (type IN ('file', 'json')),
+                extra   TEXT,
+                file_id INTEGER REFERENCES file(id) ON DELETE CASCADE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS message_filters (
+                message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+                filter_id  INTEGER NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+                matched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (message_id, filter_id)
+            )
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_message_filters_filter_id ON message_filters(filter_id)
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_created_date ON messages(created_date)
+        """)
     conn.commit()
 
 

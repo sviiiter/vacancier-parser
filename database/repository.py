@@ -42,7 +42,7 @@ class MessageRepository:
             )
             return cur.fetchone() is not None
 
-    def save(self, message: Message) -> None:
+    def save(self, message: Message) -> int | None:
         with self._conn.cursor() as cur:
             cur.execute(
                 """
@@ -50,6 +50,7 @@ class MessageRepository:
                     (description, tg_channel_link, tg_message_link, created_date, source, queue_sent, read, fingerprint, matched_keywords)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tg_message_link) DO NOTHING
+                RETURNING id
                 """,
                 (
                     message.description,
@@ -63,4 +64,13 @@ class MessageRepository:
                     json.dumps(message.matched_keywords),
                 ),
             )
-        self._conn.commit()
+            row = cur.fetchone()
+            if row is not None:
+                self._conn.commit()
+                return row["id"]
+            cur.execute(
+                "SELECT id FROM messages WHERE tg_message_link = %s",
+                (message.tg_message_link,),
+            )
+            row = cur.fetchone()
+        return row["id"] if row else None

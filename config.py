@@ -21,12 +21,6 @@ TELEGRAM_CHANNELS: list[str] = [
     "it_jobs_armenia",
 ]
 
-FILTER_RULES: dict = json.loads(os.environ.get("FILTER_RULES", json.dumps({
-    "required": ["php"],
-    "any": ["developer", "engineer", "backend"],
-    "exclude": ["wordpress"]
-})))
-
 # HeadHunter
 HH_KEYWORDS: list[str] = json.loads(
     os.environ.get("HH_KEYWORDS", '["PHP Senior", "Python Senior", "backend senior"]')
@@ -53,3 +47,6 @@ RSS_FEEDS: list[str] = json.loads(
 
 # RabbitMQ
 RABBITMQ_URL: str = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+
+# Redis (for caching pending messages)
+REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
