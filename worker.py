@@ -11,6 +11,7 @@ from config import RABBITMQ_URL
 from database.connection import get_connection, init_schema
 from database.repository import MessageRepository
 from models.message import Message
+from processor.duplicate_checker import DuplicateChecker
 from processor.text_cleaner import strip_html
 
 logging.basicConfig(
@@ -27,6 +28,7 @@ class MessageWorker:
         self._connection: Optional[pika.BlockingConnection] = None
         self._channel: Optional[pika.adapters.blocking_connection.BlockingChannel] = None
         self._repo: Optional[MessageRepository] = None
+        self._checker: Optional[DuplicateChecker] = None
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -56,6 +58,7 @@ class MessageWorker:
         conn = get_connection(self._database_url)
         init_schema(conn)
         self._repo = MessageRepository(conn)
+        self._checker = DuplicateChecker(conn)
         log.info("Database connection established")
 
     def _setup_rabbitmq(self) -> None:
@@ -82,7 +85,23 @@ class MessageWorker:
     def _process_message(self, ch, method, properties, body: bytes) -> None:
         try:
             message = Message.from_json(body.decode('utf-8'))
+
+            # Check for duplicates by link
+            if self._checker.exists(message.tg_message_link):
+                log.info("Duplicate [%s]: %s", message.source, message.tg_message_link)
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
             message.description = strip_html(message.description)
+
+            # Generate and check fingerprint
+            fingerprint = DuplicateChecker.generate_fingerprint(message.description)
+            if fingerprint and self._checker.exists_by_fingerprint(fingerprint):
+                log.info("Duplicate by fingerprint [%s]: %s", message.source, message.tg_message_link)
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            message.fingerprint = fingerprint
             self._repo.save(message)
             log.info("Saved [%s]: %s", message.source, message.tg_message_link)
             ch.basic_ack(delivery_tag=method.delivery_tag)
