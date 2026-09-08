@@ -8,8 +8,8 @@ class MockConnection:
     pass
 
 
-def test_match_message_with_matching_keywords():
-    """Test that KeywordMatcher finds matching keywords in message."""
+def test_required_keywords_all_present():
+    """Test that all required keywords must be present."""
     conn = MockConnection()
     matcher = KeywordMatcher(conn)
 
@@ -17,12 +17,7 @@ def test_match_message_with_matching_keywords():
         {
             "id": 1,
             "type": "json",
-            "extra": '["python", "developer"]',
-        },
-        {
-            "id": 2,
-            "type": "json",
-            "extra": '["php", "senior"]',
+            "extra": '{"required": ["python", "developer"]}',
         },
     ]
 
@@ -32,44 +27,17 @@ def test_match_message_with_matching_keywords():
     assert matched_ids == [1]
 
 
-def test_match_message_with_multiple_matches():
-    """Test matching against multiple filters."""
+def test_required_keywords_missing():
+    """Test that filter doesn't match if required keyword is missing."""
     conn = MockConnection()
     matcher = KeywordMatcher(conn)
 
     filters = [
-        {"id": 1, "type": "json", "extra": '["python", "developer"]'},
-        {"id": 2, "type": "json", "extra": '["senior"]'},
-    ]
-
-    description = "Senior Python Developer needed"
-    matched_ids = matcher.match_message(1, description, filters)
-
-    assert set(matched_ids) == {1, 2}
-
-
-def test_match_message_case_insensitive():
-    """Test that matching is case-insensitive."""
-    conn = MockConnection()
-    matcher = KeywordMatcher(conn)
-
-    filters = [
-        {"id": 1, "type": "json", "extra": '["Python"]'},
-    ]
-
-    description = "Looking for a python developer"
-    matched_ids = matcher.match_message(1, description, filters)
-
-    assert matched_ids == [1]
-
-
-def test_match_message_no_matches():
-    """Test when no keywords match."""
-    conn = MockConnection()
-    matcher = KeywordMatcher(conn)
-
-    filters = [
-        {"id": 1, "type": "json", "extra": '["java", "rust"]'},
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"required": ["python", "senior"]}',
+        },
     ]
 
     description = "Looking for a Python Developer"
@@ -78,13 +46,133 @@ def test_match_message_no_matches():
     assert matched_ids == []
 
 
-def test_match_message_empty_description():
+def test_any_keywords_one_present():
+    """Test that at least one 'any' keyword must be present."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"any": ["senior", "junior", "mid-level"]}',
+        },
+    ]
+
+    description = "Looking for a junior Python Developer"
+    matched_ids = matcher.match_message(1, description, filters)
+
+    assert matched_ids == [1]
+
+
+def test_any_keywords_none_present():
+    """Test that filter doesn't match if no 'any' keyword is present."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"any": ["senior", "manager"]}',
+        },
+    ]
+
+    description = "Looking for a Python Developer"
+    matched_ids = matcher.match_message(1, description, filters)
+
+    assert matched_ids == []
+
+
+def test_exclude_keywords_none_present():
+    """Test that filter matches when excluded keywords are not present."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"any": ["python"], "exclude": ["wordpress"]}',
+        },
+    ]
+
+    description = "Looking for a Python Developer"
+    matched_ids = matcher.match_message(1, description, filters)
+
+    assert matched_ids == [1]
+
+
+def test_exclude_keywords_present():
+    """Test that filter doesn't match if excluded keyword is present."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"any": ["python"], "exclude": ["wordpress"]}',
+        },
+    ]
+
+    description = "Looking for a Python Developer with WordPress experience"
+    matched_ids = matcher.match_message(1, description, filters)
+
+    assert matched_ids == []
+
+
+def test_combined_rules():
+    """Test combination of required, any, and exclude rules."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {
+            "id": 1,
+            "type": "json",
+            "extra": '{"required": ["python"], "any": ["senior", "lead"], "exclude": ["wordpress"]}',
+        },
+    ]
+
+    # Match: has required, has any, no exclude
+    description = "Senior Python Developer needed"
+    matched_ids = matcher.match_message(1, description, filters)
+    assert matched_ids == [1]
+
+    # No match: has required and any but has exclude
+    description = "Senior Python Developer with WordPress"
+    matched_ids = matcher.match_message(1, description, filters)
+    assert matched_ids == []
+
+    # No match: missing required keyword
+    description = "Senior Java Developer"
+    matched_ids = matcher.match_message(1, description, filters)
+    assert matched_ids == []
+
+
+def test_case_insensitive():
+    """Test that matching is case-insensitive."""
+    conn = MockConnection()
+    matcher = KeywordMatcher(conn)
+
+    filters = [
+        {"id": 1, "type": "json", "extra": '{"required": ["PYTHON"]}'},
+    ]
+
+    description = "Looking for python developer"
+    matched_ids = matcher.match_message(1, description, filters)
+
+    assert matched_ids == [1]
+
+
+def test_empty_description():
     """Test with empty description."""
     conn = MockConnection()
     matcher = KeywordMatcher(conn)
 
     filters = [
-        {"id": 1, "type": "json", "extra": '["python"]'},
+        {"id": 1, "type": "json", "extra": '{"required": ["python"]}'},
     ]
 
     matched_ids = matcher.match_message(1, "", filters)
@@ -92,7 +180,7 @@ def test_match_message_empty_description():
     assert matched_ids == []
 
 
-def test_match_message_invalid_json():
+def test_invalid_json():
     """Test handling of invalid JSON in filter."""
     conn = MockConnection()
     matcher = KeywordMatcher(conn)
@@ -107,16 +195,16 @@ def test_match_message_invalid_json():
     assert matched_ids == []
 
 
-def test_match_message_substring_matching():
-    """Test substring matching of keywords."""
+def test_no_rules():
+    """Test that filter with no rules doesn't match."""
     conn = MockConnection()
     matcher = KeywordMatcher(conn)
 
     filters = [
-        {"id": 1, "type": "json", "extra": '["dev"]'},
+        {"id": 1, "type": "json", "extra": '{}'},
     ]
 
-    description = "Looking for a Developer"
+    description = "Looking for a Python Developer"
     matched_ids = matcher.match_message(1, description, filters)
 
-    assert matched_ids == [1]
+    assert matched_ids == []
