@@ -92,22 +92,9 @@ class CachePublisher:
             self._redis.sadd(f"pending:{chat_id}", *message_ids)
             self._redis.sadd("pending:index", chat_id)
 
-            # Update subscriber's message_sent_last_date and messages_received
-            with self._conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE subscribers
-                    SET message_sent_last_date = %s,
-                        messages_received = messages_received + %s
-                    WHERE id = %s
-                    """,
-                    (last_message_date, len(message_ids), sub_id),
-                )
-            self._conn.commit()
-
-            log.info("Published %d message(s) for chat_id=%s (limit: %s, received: %d)",
+            log.info("Staged %d message(s) for chat_id=%s (limit: %s, quota remaining: %d)",
                      len(message_ids), chat_id, messages_limit or "unlimited",
-                     messages_received + len(message_ids))
+                     (messages_limit - messages_received) if messages_limit else "unlimited")
 
     def _get_settings(self) -> dict:
         """Get bot settings from database."""
