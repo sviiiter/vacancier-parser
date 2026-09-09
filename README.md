@@ -1,8 +1,12 @@
-# Vacancier — Telegram Channel Parser
+# Vacancier — Telegram Channel Parser v2
 
-Fetches messages from a list of Telegram channels, filters by keywords (`PHP`, `backend`, `senior`),
-deduplicates by message link, and persists matching vacancies to a local SQLite database.
-Runs nightly at 02:00 UTC inside a Docker container via `supercronic`.
+A three-stage job posting pipeline:
+
+1. **Parser** (`parser.py`): Fetches messages from Telegram channels, deduplicates by link + content fingerprint, saves raw messages to database
+2. **Matcher** (`matcher.py`): Matches saved messages against subscriber filters (keyword-based or OpenAI-based), tags message-filter relationships
+3. **Cache Publisher** (`cache/publisher.py`): Stages matched messages to Redis for subscribers, respecting trial quota *read-only* (no quota updates)
+
+The Telegram bot (`vacancier-tg-bot`) drains the Redis queue and sends messages to subscribers, updating quota counters only after confirmed delivery.
 
 ---
 
@@ -11,55 +15,93 @@ Runs nightly at 02:00 UTC inside a Docker container via `supercronic`.
 ```
 vacancier/
 │
-├── config.py                   # Central config: channel list, keywords, DB path, Telegram credentials
+├── config.py                   # Central config: DB, Redis, Telegram credentials
 │
 ├── models/
-│   └── message.py              # Message dataclass — shared data contract across all layers
+│   └── message.py              # Message dataclass — shared data contract
 │
 ├── database/
-│   ├── connection.py           # SQLite connection factory + schema initialisation (CREATE TABLE IF NOT EXISTS)
-│   └── repository.py           # MessageRepository — get_last_created_date, get_existing_links, save
+│   ├── connection.py           # PostgreSQL connection + schema init
+│   ├── filter_repository.py    # FilterRepository — load filters, save message-filter tags
+│   └── message_repository.py   # MessageRepository — save, fetch, check duplicates
 │
-├── processor/                  # Pure logic — no I/O, no database; fully unit-testable
-│   ├── interfaces.py           # MessageFilterProtocol, DuplicateCheckerProtocol (typing.Protocol)
-│   ├── keyword_filter.py       # KeywordFilter — case-insensitive keyword match against description
-│   ├── duplicate_checker.py    # DuplicateChecker — tracks seen tg_message_link values in a set
-│   └── message_processor.py   # MessageProcessor — orchestrates filter + duplicate check (DI via constructor)
+├── parser.py                   # Stage 1: Fetch new messages from Telegram channels
 │
-├── telegram/
-│   └── client.py               # TelegramChannelFetcher — async context manager wrapping Telethon; fetches
-│                               #   messages newer than the last stored date, newest-first, breaks on cutoff
+├── worker.py                   # Stage 1b: Deduplicate (by link + fingerprint), strip HTML, save to DB
 │
-├── parser.py                   # Entry point: wires DB → fetcher → processor → repository; run by cron
+├── processor/                  # Stage 2: Match messages against subscriber filters
+│   ├── matcher_protocol.py     # MatchProcessor — interface for matching strategies
+│   ├── keyword_matcher.py      # KeywordMatcher — rule-based filtering (required/any/exclude)
+│   ├── openai_matcher.py       # OpenAIMatcher — AI-based filtering from uploaded files
+│   └── duplicate_checker.py    # DuplicateChecker — SHA256 fingerprinting for content dedup
 │
-├── generate_session.py         # One-time helper: interactive Telegram login → prints session string for .env
+├── cache/
+│   └── publisher.py            # Stage 3: Stage matched messages to Redis (quota read-only)
+│                               #   Bot updates quota counters after actual delivery
 │
-├── tests/                      # Pure unit tests — zero database, zero Telegram, zero I/O
-│   ├── test_keyword_filter.py  # Tests: exact/lower/mixed case, no match, empty string
-│   ├── test_duplicate_checker.py  # Tests: first occurrence, repeat, pre-seeded set, different links
-│   └── test_message_processor.py  # Tests: filter pass/fail, duplicate, mixed batch, empty input
-│                               #   Uses inline stub classes (no mocking library needed)
+├── matcher.py                  # Orchestrates: load filters → match messages → publish to Redis
 │
-├── Dockerfile                  # python:3.12-slim + supercronic; ENTRYPOINT runs crontab
-├── crontab                     # supercronic schedule: runs parser.py at 02:00 UTC every night
-├── docker-compose.yml          # Mounts ./data volume for SQLite persistence; reads .env
+├── database_fill.py            # Helper: populate filters table from JSON files
 │
-├── requirements.txt            # telethon, python-dotenv
-├── .env.example                # Template for required environment variables
-└── .gitignore                  # Excludes .env, data/, *.session, __pycache__
+├── tests/                      # Unit tests — zero live DB/API/Telegram
+│   ├── test_keyword_matcher.py # Tests: required/any/exclude rules, combined
+│   └── test_*.py               # More comprehensive test coverage
+│
+├── Dockerfile                  # python:3.12 + matcher job runner
+├── docker-compose.yml          # Services: postgres, redis, parser, matcher containers
+│
+├── requirements.txt            # psycopg2-binary, redis, requests
+├── .env.example                # Template for DATABASE_URL, REDIS_URL, etc.
+└── .gitignore                  # Excludes .env, __pycache__, .pytest_cache
 ```
 
 ---
 
 ## Database Schema
 
+**messages** — Job postings from Telegram channels
 ```sql
 CREATE TABLE IF NOT EXISTS messages (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    description     TEXT NOT NULL,
-    tg_channel_link TEXT NOT NULL,
-    tg_message_link TEXT NOT NULL UNIQUE,  -- duplicate guard at DB level
-    created_date    TEXT NOT NULL           -- ISO 8601 UTC string
+    id                  SERIAL PRIMARY KEY,
+    description         TEXT NOT NULL,
+    tg_channel_link     TEXT NOT NULL,
+    tg_message_link     TEXT NOT NULL UNIQUE,  -- dedup by link
+    fingerprint         TEXT,                  -- SHA256 of normalized text, dedup by content
+    created_date        TIMESTAMP NOT NULL,
+    source              TEXT
+);
+```
+
+**filters** — Subscriber-defined filter rules
+```sql
+CREATE TABLE IF NOT EXISTS filters (
+    id                  SERIAL PRIMARY KEY,
+    subscriber_id       INT NOT NULL,
+    name                VARCHAR(255),
+    type                VARCHAR(10),           -- 'json' or 'file'
+    extra               TEXT,                  -- filter rules (JSON or file path)
+    created_at          TIMESTAMP DEFAULT NOW()
+);
+```
+
+**message_filters** — Relationship between messages and matching filters
+```sql
+CREATE TABLE IF NOT EXISTS message_filters (
+    id                  SERIAL PRIMARY KEY,
+    message_id          INT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    filter_id           INT NOT NULL REFERENCES filters(id) ON DELETE CASCADE,
+    created_at          TIMESTAMP DEFAULT NOW(),
+    UNIQUE (message_id, filter_id)
+);
+```
+
+**bot_settings** — Trial configuration for the bot
+```sql
+CREATE TABLE IF NOT EXISTS bot_settings (
+    id                  INT PRIMARY KEY,
+    trial_type          VARCHAR(50) DEFAULT 'messages',  -- 'messages' or 'days'
+    trial_message_limit INT DEFAULT 10,
+    trial_days          INT DEFAULT 2
 );
 ```
 
@@ -67,77 +109,107 @@ CREATE TABLE IF NOT EXISTS messages (
 
 ## Setup
 
-### 1. Telegram API credentials
+### Prerequisites
 
-1. Go to <https://my.telegram.org/apps> and create an application.
-2. Copy **App api_id** and **App api_hash**.
+- PostgreSQL (or MySQL/SQLite)
+- Redis
+- Python 3.11+
+- Telegram account (for fetching channel messages)
 
-### 2. Generate a session string (one-time, run locally)
+### Configuration
 
 ```bash
 cp .env.example .env
-# fill in TELEGRAM_API_ID and TELEGRAM_API_HASH in .env
-
-pip install -r requirements.txt
-python generate_session.py
 ```
 
-Enter your phone number and the SMS verification code. The script prints a long string — paste it into `.env` as `TELEGRAM_SESSION_STRING`.
+Fill in:
+- `DATABASE_URL` — PostgreSQL/MySQL/SQLite connection string
+- `REDIS_URL` — Redis connection URL (e.g., `redis://localhost:6379`)
+- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` — from https://my.telegram.org/apps
+- `TELEGRAM_SESSION_STRING` — generate via `python generate_session.py` (one-time)
 
-### 3. Configure channels
+### Install dependencies
 
-Edit `config.py` and replace the example channel names in `TELEGRAM_CHANNELS` with the actual public channel usernames you want to monitor (without `@`).
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
-## Running locally
+## Running Locally
 
+**Stage 1: Fetch and save messages**
 ```bash
 python parser.py
 ```
+Fetches new messages from configured Telegram channels, deduplicates, strips HTML, saves to DB.
 
-Logs go to stdout. The database is created at the path set by `DB_PATH` (default: `data/vacancier.db`).
+**Stage 2: Match messages against filters**
+```bash
+python matcher.py
+```
+Loads all filters, matches untagged messages, stages matched messages to Redis cache.
+
+**Stage 3: Bot drains cache**
+Run the bot repo (`vacancier-tg-bot/bot/main.py`) to deliver staged messages to subscribers.
 
 ---
 
-## Running tests
+## Running Tests
 
 ```bash
-python -m unittest discover tests/
+python -m pytest tests/ -v
 ```
 
-No database or Telegram connection is required — all tests are pure unit tests.
+Tests are isolated (no real DB/Redis/Telegram required).
 
 ---
 
-## Docker
-
-### Build and start
+## Docker Compose
 
 ```bash
 docker compose up -d
 ```
 
-The container runs `parser.py` every night at **02:00 UTC**. Logs are visible via:
+Starts:
+- PostgreSQL database
+- Redis cache
+- Parser (cron: daily fetch)
+- Matcher (cron: continuous message matching)
 
+Logs:
 ```bash
-docker compose logs -f
-```
-
-### Data persistence
-
-`./data/` on the host is mounted to `/app/data/` inside the container, so `vacancier.db` survives restarts and image rebuilds.
-
-### Changing the schedule
-
-Edit `crontab` (standard cron syntax) and rebuild:
-
-```bash
-docker compose up -d --build
+docker compose logs -f matcher
+docker compose logs -f parser
 ```
 
 ---
 
-## Authentication note
+## Data Flow
 
-The parser authenticates as a **regular Telegram user account** via Telethon (MTProto). This allows reading message history from any public channel without being an admin. The session is stored as a string in the `TELEGRAM_SESSION_STRING` environment variable — no interactive login is needed inside the container after the initial `generate_session.py` run.
+```
+1. parser.py 
+   ↓ (fetch, deduplicate, strip HTML)
+   
+2. database: messages table
+   ↓
+   
+3. matcher.py
+   ↓ (match against subscriber filters)
+   
+4. database: message_filters table
+   ↓
+   
+5. cache/publisher.py
+   ↓ (stage to Redis, quota read-only)
+   
+6. Redis: pending:{chat_id} sets
+   ↓
+   
+7. Bot (vacancier-tg-bot/bot/main.py)
+   ↓ (drain, deliver, update quota counters)
+   
+8. Subscribers receive messages in Telegram
+```
+
+**Key point**: The matcher only stages messages to Redis. The bot is responsible for respecting trial quotas and updating `messages_received` counters after confirmed delivery.
