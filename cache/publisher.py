@@ -43,7 +43,7 @@ class CachePublisher:
             with self._conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT DISTINCT m.id
+                    SELECT m.id
                     FROM messages m
                     JOIN message_filters mf ON mf.message_id = m.id
                     WHERE mf.filter_id = ANY(%s)
