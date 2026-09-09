@@ -124,11 +124,17 @@ def run() -> None:
         log.info("Matcher job completed")
 
     except Exception as e:
-        log.error("Fatal error: %s", e)
+        log.error("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
     finally:
-        conn.close()
-        redis_client.close()
+        try:
+            conn.close()
+        except Exception as e:
+            log.warning("Error closing database connection: %s", e)
+        try:
+            redis_client.close()
+        except Exception as e:
+            log.warning("Error closing Redis connection: %s", e)
 
 
 if __name__ == "__main__":
