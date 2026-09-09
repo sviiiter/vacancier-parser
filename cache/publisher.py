@@ -52,7 +52,7 @@ class CachePublisher:
                     """,
                     (filter_ids, last_date, last_date),
                 )
-                message_ids = [row[0] for row in cur.fetchall()]
+                message_ids = [row['id'] for row in cur.fetchall()]
 
             # Publish to Redis
             if message_ids:
