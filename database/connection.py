@@ -56,6 +56,17 @@ def init_schema(conn: psycopg2.extensions.connection) -> None:
             )
         """)
 
+        for column, definition in [
+            ("name", "TEXT"),
+            ("created_at", "TIMESTAMPTZ NOT NULL DEFAULT now()"),
+        ]:
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = 'filters' AND column_name = %s",
+                (column,),
+            )
+            if cur.fetchone() is None:
+                cur.execute(f'ALTER TABLE filters ADD COLUMN "{column}" {definition}')
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS message_filters (
                 message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
